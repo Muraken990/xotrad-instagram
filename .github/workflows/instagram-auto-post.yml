@@ -2,8 +2,8 @@ name: Instagram Auto Post
 
 on:
   schedule:
-    # 毎時0分に実行（UTC 0時〜19時 = 20回/日）
-    - cron: '0 0-19 * * *'
+    # 毎時0分に実行（24回/日、スクリプト側で1日20件制限）
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
