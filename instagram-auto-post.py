@@ -359,22 +359,27 @@ def post_to_instagram(access_token, image_urls, caption):
     Instagramに投稿する。
     - 画像1枚: 通常投稿
     - 画像2枚以上: カルーセル投稿（最大10枚）
+
+    Returns: (media_id, container_created)
+        media_id: 成功時はMedia ID文字列、失敗時はNone
+        container_created: コンテナ作成まで成功したらTrue
     """
     if not image_urls:
         print("    画像がありません")
-        return None
+        return None, False
 
     if len(image_urls) == 1:
         # --- Single image post ---
         container_id = create_media_container(access_token, image_urls[0], caption=caption)
         if not container_id:
-            return None
+            return None, False
 
         print("    コンテナ処理待ち...")
         if not wait_for_container(access_token, container_id):
-            return None
+            return None, True
 
-        return publish_media(access_token, container_id)
+        result = publish_media(access_token, container_id)
+        return result, True
 
     # --- Carousel post (2+ images) ---
     print(f"    カルーセル投稿: {len(image_urls)}枚")
@@ -396,31 +401,33 @@ def post_to_instagram(access_token, image_urls, caption):
             print("    カルーセルに必要な2枚未満のため通常投稿にフォールバック")
             container_id = create_media_container(access_token, image_urls[0], caption=caption)
             if not container_id:
-                return None
+                return None, False
             print("    コンテナ処理待ち...")
             if not wait_for_container(access_token, container_id):
-                return None
-            return publish_media(access_token, container_id)
-        return None
+                return None, True
+            result = publish_media(access_token, container_id)
+            return result, True
+        return None, False
 
     # Wait for all children to be processed
     print("    子コンテナ処理待ち...")
     for child_id in children_ids:
         if not wait_for_container(access_token, child_id):
             print(f"    子コンテナ {child_id} の処理失敗")
-            return None
+            return None, True
 
     # Step 2: Create carousel container
     carousel_id = create_carousel_container(access_token, children_ids, caption)
     if not carousel_id:
-        return None
+        return None, True
 
     print("    カルーセルコンテナ処理待ち...")
     if not wait_for_container(access_token, carousel_id):
-        return None
+        return None, True
 
     # Step 3: Publish
-    return publish_media(access_token, carousel_id)
+    result = publish_media(access_token, carousel_id)
+    return result, True
 
 
 # =============================================
@@ -636,15 +643,19 @@ def main():
             success_count += 1
             continue
 
-        media_id = post_to_instagram(access_token, image_urls, caption)
-
-        # 成功・失敗に関わらず記録を保存（コンテナ作成後に403でも投稿される場合があるため）
-        save_posted_record(product['id'], media_id or 'failed', product['name'], product.get('image_url', ''))
+        media_id, container_created = post_to_instagram(access_token, image_urls, caption)
 
         if media_id:
+            save_posted_record(product['id'], media_id, product['name'], product.get('image_url', ''))
             success_count += 1
             print(f"  投稿成功!")
+        elif container_created:
+            # コンテナ作成済みだがpublish失敗（403等）→ Instagramが自動公開する場合があるため記録
+            save_posted_record(product['id'], 'publish_failed', product['name'], product.get('image_url', ''))
+            fail_count += 1
+            print(f"  投稿失敗（コンテナ作成済み、記録保存）")
         else:
+            # コンテナ作成自体が失敗 → 投稿されていないので記録しない
             fail_count += 1
             print(f"  投稿失敗!")
 
