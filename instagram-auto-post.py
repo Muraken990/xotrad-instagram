@@ -464,13 +464,14 @@ def load_posted_records():
     return {'posted': []}
 
 
-def save_posted_record(product_id, media_id, product_name):
+def save_posted_record(product_id, media_id, product_name, image_url=''):
     """投稿済み記録を保存"""
     records = load_posted_records()
     records['posted'].append({
         'product_id': product_id,
         'media_id': media_id,
         'product_name': product_name,
+        'image_url': image_url,
         'posted_at': datetime.now().isoformat(),
     })
     with open(POSTED_FILE, 'w') as f:
@@ -481,6 +482,17 @@ def get_posted_product_ids():
     """投稿済み商品IDのセットを取得"""
     records = load_posted_records()
     return {r['product_id'] for r in records.get('posted', [])}
+
+
+def get_posted_image_urls():
+    """投稿済み画像URLのセットを取得"""
+    records = load_posted_records()
+    urls = set()
+    for r in records.get('posted', []):
+        url = r.get('image_url', '')
+        if url:
+            urls.add(url)
+    return urls
 
 
 def get_today_post_count():
@@ -582,10 +594,14 @@ def main():
         args.limit = remaining
         print(f"  残り投稿可能数に合わせてlimitを{remaining}件に調整")
 
-    # --- Filter out already posted ---
+    # --- Filter out already posted (IDと画像URLの両方でチェック) ---
     posted_ids = get_posted_product_ids()
-    unposted = [p for p in products if p['id'] not in posted_ids]
-    print(f"  未投稿商品: {len(unposted)}件 (投稿済み: {len(posted_ids)}件)")
+    posted_urls = get_posted_image_urls()
+    unposted = [p for p in products
+                 if p['id'] not in posted_ids and p['image_url'] not in posted_urls]
+    dup_images = len([p for p in products
+                      if p['id'] not in posted_ids and p['image_url'] in posted_urls])
+    print(f"  未投稿商品: {len(unposted)}件 (投稿済み: {len(posted_ids)}件, 画像重複: {dup_images}件)")
 
     if not unposted:
         print("\n全商品が投稿済みです。")
@@ -623,7 +639,7 @@ def main():
         media_id = post_to_instagram(access_token, image_urls, caption)
 
         if media_id:
-            save_posted_record(product['id'], media_id, product['name'])
+            save_posted_record(product['id'], media_id, product['name'], product.get('image_url', ''))
             success_count += 1
             print(f"  投稿成功!")
         else:
