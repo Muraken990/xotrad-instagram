@@ -638,8 +638,10 @@ def main():
 
         media_id = post_to_instagram(access_token, image_urls, caption)
 
+        # 成功・失敗に関わらず記録を保存（コンテナ作成後に403でも投稿される場合があるため）
+        save_posted_record(product['id'], media_id or 'failed', product['name'], product.get('image_url', ''))
+
         if media_id:
-            save_posted_record(product['id'], media_id, product['name'], product.get('image_url', ''))
             success_count += 1
             print(f"  投稿成功!")
         else:
@@ -659,6 +661,9 @@ def main():
     if args.dry_run:
         print(f"  (ドライラン - 実際の投稿なし)")
     print(f"{'=' * 50}")
+
+    if fail_count > 0 and success_count == 0:
+        sys.exit(1)
 
 
 if __name__ == '__main__':
