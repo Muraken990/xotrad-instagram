@@ -673,8 +673,6 @@ def main():
         print(f"  (ドライラン - 実際の投稿なし)")
     print(f"{'=' * 50}")
 
-    if fail_count > 0 and success_count == 0:
-        sys.exit(1)
 
 
 if __name__ == '__main__':

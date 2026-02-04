@@ -30,6 +30,8 @@ jobs:
           echo '${{ secrets.INSTAGRAM_TOKEN_JSON }}' > instagram-token.json
 
       - name: Run Instagram auto-post (1 item)
+        id: post
+        continue-on-error: true
         env:
           INSTAGRAM_ACCESS_TOKEN: ${{ secrets.INSTAGRAM_ACCESS_TOKEN }}
         run: python instagram-auto-post.py --limit 1
