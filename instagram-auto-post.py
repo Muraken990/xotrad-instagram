@@ -251,6 +251,10 @@ def create_media_container(access_token, image_url, caption=None, is_carousel_it
     Instagram メディアコンテナを作成する。
     画像URLは公開アクセス可能なURLである必要がある。
     is_carousel_item=True の場合、カルーセルの子アイテムとして作成。
+
+    Returns: (container_id, error_code)
+        container_id: 成功時はID文字列、失敗時はNone
+        error_code: エラー時はエラーコード（36003=アスペクト比エラー）、成功時はNone
     """
     url = f"{INSTAGRAM_CONFIG['graph_url']}/{INSTAGRAM_CONFIG['api_version']}/{INSTAGRAM_CONFIG['user_id']}/media"
 
@@ -270,11 +274,18 @@ def create_media_container(access_token, image_url, caption=None, is_carousel_it
         container_id = resp.json().get('id')
         label = "子コンテナ" if is_carousel_item else "メディアコンテナ"
         print(f"    {label}作成: {container_id}")
-        return container_id
+        return container_id, None
     else:
         print(f"    コンテナ作成失敗: {resp.status_code}")
         print(f"    レスポンス: {resp.text}")
-        return None
+        # エラーコードを抽出
+        error_code = None
+        try:
+            error_data = resp.json()
+            error_code = error_data.get('error', {}).get('code')
+        except:
+            pass
+        return None, error_code
 
 
 def create_carousel_container(access_token, children_ids, caption):
@@ -360,36 +371,41 @@ def post_to_instagram(access_token, image_urls, caption):
     - 画像1枚: 通常投稿
     - 画像2枚以上: カルーセル投稿（最大10枚）
 
-    Returns: (media_id, container_created)
+    Returns: (media_id, container_created, is_aspect_ratio_error)
         media_id: 成功時はMedia ID文字列、失敗時はNone
         container_created: コンテナ作成まで成功したらTrue
+        is_aspect_ratio_error: アスペクト比エラーの場合True
     """
     if not image_urls:
         print("    画像がありません")
-        return None, False
+        return None, False, False
 
     if len(image_urls) == 1:
         # --- Single image post ---
-        container_id = create_media_container(access_token, image_urls[0], caption=caption)
+        container_id, error_code = create_media_container(access_token, image_urls[0], caption=caption)
         if not container_id:
-            return None, False
+            is_aspect_error = (error_code == 36003)
+            return None, False, is_aspect_error
 
         print("    コンテナ処理待ち...")
         if not wait_for_container(access_token, container_id):
-            return None, True
+            return None, True, False
 
         result = publish_media(access_token, container_id)
-        return result, True
+        return result, True, False
 
     # --- Carousel post (2+ images) ---
     print(f"    カルーセル投稿: {len(image_urls)}枚")
 
     # Step 1: Create child containers for each image
     children_ids = []
+    aspect_ratio_errors = 0
     for i, img_url in enumerate(image_urls):
         print(f"    画像 {i + 1}/{len(image_urls)}...")
-        child_id = create_media_container(access_token, img_url, is_carousel_item=True)
+        child_id, error_code = create_media_container(access_token, img_url, is_carousel_item=True)
         if not child_id:
+            if error_code == 36003:
+                aspect_ratio_errors += 1
             print(f"    画像 {i + 1} のコンテナ作成失敗、スキップ")
             continue
         children_ids.append(child_id)
@@ -399,35 +415,38 @@ def post_to_instagram(access_token, image_urls, caption):
         # Carousel requires at least 2 items; fall back to single if only 1 succeeded
         if len(children_ids) == 1:
             print("    カルーセルに必要な2枚未満のため通常投稿にフォールバック")
-            container_id = create_media_container(access_token, image_urls[0], caption=caption)
+            container_id, error_code = create_media_container(access_token, image_urls[0], caption=caption)
             if not container_id:
-                return None, False
+                is_aspect_error = (error_code == 36003) or (aspect_ratio_errors == len(image_urls))
+                return None, False, is_aspect_error
             print("    コンテナ処理待ち...")
             if not wait_for_container(access_token, container_id):
-                return None, True
+                return None, True, False
             result = publish_media(access_token, container_id)
-            return result, True
-        return None, False
+            return result, True, False
+        # 全画像がアスペクト比エラーの場合
+        is_aspect_error = (aspect_ratio_errors == len(image_urls))
+        return None, False, is_aspect_error
 
     # Wait for all children to be processed
     print("    子コンテナ処理待ち...")
     for child_id in children_ids:
         if not wait_for_container(access_token, child_id):
             print(f"    子コンテナ {child_id} の処理失敗")
-            return None, True
+            return None, True, False
 
     # Step 2: Create carousel container
     carousel_id = create_carousel_container(access_token, children_ids, caption)
     if not carousel_id:
-        return None, True
+        return None, True, False
 
     print("    カルーセルコンテナ処理待ち...")
     if not wait_for_container(access_token, carousel_id):
-        return None, True
+        return None, True, False
 
     # Step 3: Publish
     result = publish_media(access_token, carousel_id)
-    return result, True
+    return result, True, False
 
 
 # =============================================
@@ -468,7 +487,7 @@ def load_posted_records():
     if os.path.exists(POSTED_FILE):
         with open(POSTED_FILE, 'r') as f:
             return json.load(f)
-    return {'posted': []}
+    return {'posted': [], 'failed': []}
 
 
 def save_posted_record(product_id, media_id, product_name, image_url=''):
@@ -489,6 +508,32 @@ def get_posted_product_ids():
     """投稿済み商品IDのセットを取得"""
     records = load_posted_records()
     return {r['product_id'] for r in records.get('posted', [])}
+
+
+def get_failed_product_ids():
+    """失敗した商品IDのセットを取得"""
+    records = load_posted_records()
+    return {r['product_id'] for r in records.get('failed', [])}
+
+
+def save_failed_record(product_id, product_name, reason, image_url=''):
+    """失敗記録を保存"""
+    records = load_posted_records()
+    if 'failed' not in records:
+        records['failed'] = []
+    # 既に記録済みならスキップ
+    existing_ids = {r['product_id'] for r in records['failed']}
+    if product_id in existing_ids:
+        return
+    records['failed'].append({
+        'product_id': product_id,
+        'product_name': product_name,
+        'reason': reason,
+        'image_url': image_url,
+        'failed_at': datetime.now().isoformat(),
+    })
+    with open(POSTED_FILE, 'w') as f:
+        json.dump(records, f, indent=2, ensure_ascii=False)
 
 
 def get_posted_image_urls():
@@ -601,14 +646,17 @@ def main():
         args.limit = remaining
         print(f"  残り投稿可能数に合わせてlimitを{remaining}件に調整")
 
-    # --- Filter out already posted (IDと画像URLの両方でチェック) ---
+    # --- Filter out already posted and failed (IDと画像URLの両方でチェック) ---
     posted_ids = get_posted_product_ids()
     posted_urls = get_posted_image_urls()
+    failed_ids = get_failed_product_ids()
     unposted = [p for p in products
-                 if p['id'] not in posted_ids and p['image_url'] not in posted_urls]
+                 if p['id'] not in posted_ids
+                 and p['id'] not in failed_ids
+                 and p['image_url'] not in posted_urls]
     dup_images = len([p for p in products
                       if p['id'] not in posted_ids and p['image_url'] in posted_urls])
-    print(f"  未投稿商品: {len(unposted)}件 (投稿済み: {len(posted_ids)}件, 画像重複: {dup_images}件)")
+    print(f"  未投稿商品: {len(unposted)}件 (投稿済み: {len(posted_ids)}件, 画像重複: {dup_images}件, 失敗済み: {len(failed_ids)}件)")
 
     if not unposted:
         print("\n全商品が投稿済みです。")
@@ -643,12 +691,17 @@ def main():
             success_count += 1
             continue
 
-        media_id, container_created = post_to_instagram(access_token, image_urls, caption)
+        media_id, container_created, is_aspect_ratio_error = post_to_instagram(access_token, image_urls, caption)
 
         if media_id:
             save_posted_record(product['id'], media_id, product['name'], product.get('image_url', ''))
             success_count += 1
             print(f"  投稿成功!")
+        elif is_aspect_ratio_error:
+            # アスペクト比エラー → 永続的な問題なので失敗リストに記録
+            save_failed_record(product['id'], product['name'], 'aspect_ratio_error', product.get('image_url', ''))
+            fail_count += 1
+            print(f"  投稿失敗（アスペクト比エラー、今後スキップ）")
         elif container_created:
             # コンテナ作成済みだがpublish失敗（403等）→ Instagramが自動公開する場合があるため記録
             save_posted_record(product['id'], 'publish_failed', product['name'], product.get('image_url', ''))
