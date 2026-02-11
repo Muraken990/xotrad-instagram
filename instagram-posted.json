@@ -765,5 +765,14 @@
       "image_url": "https://xotrad.com/wp-content/uploads/2026/02/2JLDmcgkSqyF9zHb26xj3m_1.jpg",
       "posted_at": "2026-02-08T17:24:24.104359"
     }
+  ],
+  "failed": [
+    {
+      "product_id": 5056,
+      "product_name": "HERMES H Pattern Tie with Box",
+      "reason": "aspect_ratio_error",
+      "image_url": "https://xotrad.com/wp-content/uploads/2026/02/m39408221145_1.jpg",
+      "failed_at": "2026-02-11T14:18:54.857433"
+    }
   ]
 }
