@@ -1373,6 +1373,13 @@
       "product_name": "necktie",
       "image_url": "https://xotrad.com/wp-content/uploads/2026/02/m25298523357_1.jpg",
       "posted_at": "2026-02-17T14:06:08.798854"
+    },
+    {
+      "product_id": 4282,
+      "media_id": "publish_failed",
+      "product_name": "Hermès Stripe Houndstooth Design Tie Gray Orange",
+      "image_url": "https://xotrad.com/wp-content/uploads/2026/02/m21234020343_1.jpg",
+      "posted_at": "2026-02-17T15:49:28.310252"
     }
   ],
   "failed": [
