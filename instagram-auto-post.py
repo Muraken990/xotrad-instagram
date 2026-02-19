@@ -35,15 +35,22 @@ WOOCOMMERCE_CONFIG = {
 }
 
 INSTAGRAM_CONFIG = {
-    'app_id': '839908195748501',
-    'app_secret': '53921ed00c9ecaf80d58dafc3fc8c4a3',
+    'app_id': '1210595667861115',
+    'app_secret': 'd27c4befd1db45740093c4dc501e7388',
     'user_id': '17841480619602761',
     'api_version': 'v21.0',
     'graph_url': 'https://graph.instagram.com',
 }
 
+FACEBOOK_CONFIG = {
+    'page_id': '1012229308632138',
+    'api_version': 'v21.0',
+    'graph_url': 'https://graph.facebook.com',
+}
+
 POSTED_FILE = os.path.join(BASE_DIR, 'instagram-posted.json')
 TOKEN_FILE = os.path.join(BASE_DIR, 'instagram-token.json')
+FACEBOOK_TOKEN_FILE = os.path.join(BASE_DIR, 'facebook-token.json')
 
 # Instagram API rate limit: max 25 posts per 24h for content publishing
 BATCH_DEFAULT = 5
@@ -59,6 +66,94 @@ CAPTION_TEMPLATE = """\u2726 {product_name}
 \U0001f517 Shop: {product_url}
 
 #xotrad #luxurynecktie #silktie #vintageluxury #{brand_hashtag}"""
+
+
+# =============================================
+# Facebook Token Management
+# =============================================
+
+def load_fb_token():
+    """Facebook Page Access Tokenを読み込む（環境変数 > ファイル）"""
+    env_token = os.environ.get('FACEBOOK_PAGE_ACCESS_TOKEN')
+    if env_token:
+        return env_token
+    if os.path.exists(FACEBOOK_TOKEN_FILE):
+        with open(FACEBOOK_TOKEN_FILE, 'r') as f:
+            data = json.load(f)
+            return data.get('access_token')
+    return None
+
+
+def save_fb_token(access_token):
+    """Facebook Page Access Tokenをファイルに保存"""
+    data = {
+        'access_token': access_token,
+        'page_id': FACEBOOK_CONFIG['page_id'],
+        'saved_at': datetime.now().isoformat(),
+    }
+    with open(FACEBOOK_TOKEN_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+    print(f"  Facebookトークンを保存しました: {FACEBOOK_TOKEN_FILE}")
+
+
+def exchange_fb_long_lived_token(short_lived_user_token):
+    """
+    Facebook Short-lived User Token → Long-lived User Token (60日) に変換し、
+    さらに Never-expiring Page Access Token を取得して保存する。
+    """
+    # Step 1: User Token を Long-lived に変換
+    url = f"{FACEBOOK_CONFIG['graph_url']}/oauth/access_token"
+    params = {
+        'grant_type': 'fb_exchange_token',
+        'client_id': INSTAGRAM_CONFIG['app_id'],
+        'client_secret': INSTAGRAM_CONFIG['app_secret'],
+        'fb_exchange_token': short_lived_user_token,
+    }
+    print("  Facebook User Token を Long-lived に変換中...")
+    resp = requests.get(url, params=params, timeout=30)
+    if resp.status_code != 200:
+        print(f"  変換失敗: {resp.status_code} - {resp.text}")
+        return None
+    long_lived_user_token = resp.json().get('access_token')
+    print("  Long-lived User Token 取得成功")
+
+    # Step 2: Long-lived User Token から Never-expiring Page Access Token を取得
+    url2 = f"{FACEBOOK_CONFIG['graph_url']}/{FACEBOOK_CONFIG['page_id']}"
+    params2 = {
+        'fields': 'access_token,name',
+        'access_token': long_lived_user_token,
+    }
+    resp2 = requests.get(url2, params=params2, timeout=30)
+    if resp2.status_code != 200:
+        print(f"  Page Token取得失敗: {resp2.status_code} - {resp2.text}")
+        return None
+    page_token = resp2.json().get('access_token')
+    page_name = resp2.json().get('name')
+    print(f"  Never-expiring Page Token 取得成功: {page_name}")
+    save_fb_token(page_token)
+    return page_token
+
+
+def post_photo_to_facebook(page_access_token, image_url, caption):
+    """
+    Facebook Pageに写真を投稿する。
+    Returns: post_id (成功時) or None (失敗時)
+    """
+    url = f"{FACEBOOK_CONFIG['graph_url']}/{FACEBOOK_CONFIG['api_version']}/{FACEBOOK_CONFIG['page_id']}/photos"
+    payload = {
+        'url': image_url,
+        'caption': caption,
+        'access_token': page_access_token,
+    }
+    resp = requests.post(url, data=payload, timeout=60)
+    if resp.status_code == 200:
+        post_id = resp.json().get('post_id') or resp.json().get('id')
+        print(f"    Facebook投稿成功! Post ID: {post_id}")
+        return post_id
+    else:
+        print(f"    Facebook投稿失敗: {resp.status_code}")
+        print(f"    レスポンス: {resp.text}")
+        return None
 
 
 # =============================================
@@ -578,11 +673,28 @@ def main():
                         help='保存済みトークンをリフレッシュ')
     parser.add_argument('--exchange-token', type=str, default='',
                         help='Short-lived tokenをlong-livedに変換')
+    parser.add_argument('--fb-token', type=str, default='',
+                        help='Facebook Page Access Tokenを保存')
+    parser.add_argument('--fb-exchange-token', type=str, default='',
+                        help='Facebook Short-lived User TokenをNever-expiring Page Tokenに変換')
     args = parser.parse_args()
 
     print("=" * 50)
     print("Xotrad Instagram Auto-Post")
     print("=" * 50)
+
+    # --- Facebook token handling ---
+    if args.fb_exchange_token:
+        token = exchange_fb_long_lived_token(args.fb_exchange_token)
+        if token:
+            print("\nFacebook Never-expiring Page Token の取得・保存完了。")
+        else:
+            print("\nFacebook Token変換失敗。")
+        sys.exit(0)
+
+    if args.fb_token:
+        save_fb_token(args.fb_token)
+        print("Facebookトークンを保存しました。")
 
     # --- Token handling ---
     if args.exchange_token:
@@ -697,6 +809,11 @@ def main():
             save_posted_record(product['id'], media_id, product['name'], product.get('image_url', ''))
             success_count += 1
             print(f"  投稿成功!")
+            # Facebook投稿（トークンが設定されている場合）
+            fb_token = load_fb_token()
+            if fb_token and not args.dry_run:
+                print(f"  Facebookにも投稿中...")
+                post_photo_to_facebook(fb_token, product['image_url'], caption)
         elif is_aspect_ratio_error:
             # アスペクト比エラー → 永続的な問題なので失敗リストに記録
             save_failed_record(product['id'], product['name'], 'aspect_ratio_error', product.get('image_url', ''))
@@ -707,6 +824,11 @@ def main():
             save_posted_record(product['id'], 'publish_failed', product['name'], product.get('image_url', ''))
             fail_count += 1
             print(f"  投稿失敗（コンテナ作成済み、記録保存）")
+            # Instagramは自動公開されるのでFacebookにも投稿
+            fb_token = load_fb_token()
+            if fb_token:
+                print(f"  Facebookにも投稿中...")
+                post_photo_to_facebook(fb_token, product['image_url'], caption)
         else:
             # コンテナ作成自体が失敗 → 投稿されていないので記録しない
             fail_count += 1
