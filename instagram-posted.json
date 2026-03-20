@@ -5414,6 +5414,13 @@
       "reason": "aspect_ratio_error",
       "image_url": "https://xotrad.com/wp-content/uploads/2026/02/m39408221145_1.jpg",
       "failed_at": "2026-02-11T14:18:54.857433"
+    },
+    {
+      "product_id": 12615,
+      "product_name": "Salvatore Ferragamo Silk Tie Blue Floral Made in Italy Authentic",
+      "reason": "aspect_ratio_error",
+      "image_url": "https://xotrad.com/wp-content/uploads/2026/02/m20720865739_1.jpg",
+      "failed_at": "2026-03-20T08:36:28.763030"
     }
   ]
 }
