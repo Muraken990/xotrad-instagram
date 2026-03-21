@@ -30,13 +30,13 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 WOOCOMMERCE_CONFIG = {
     'url': 'https://xotrad.com',
-    'consumer_key': 'ck_f1d34d5f51ab78f1865130dfbd2ec7796f443f44',
-    'consumer_secret': 'cs_1b0cbb325b25c331c32ba8275b228747f24774f5',
+    'consumer_key': os.environ.get('WC_CONSUMER_KEY'),
+    'consumer_secret': os.environ.get('WC_CONSUMER_SECRET'),
 }
 
 INSTAGRAM_CONFIG = {
-    'app_id': '1210595667861115',
-    'app_secret': 'd27c4befd1db45740093c4dc501e7388',
+    'app_id': os.environ.get('INSTAGRAM_APP_ID'),
+    'app_secret': os.environ.get('INSTAGRAM_APP_SECRET'),
     'user_id': '17841480619602761',
     'api_version': 'v21.0',
     'graph_url': 'https://graph.instagram.com',
